@@ -1,0 +1,50 @@
+stages:
+  - check
+  - test
+  - installer
+
+check_hdd:
+  stage: check
+  tags:
+    - my_runner
+  script: df -h
+
+check_ram:
+  stage: check
+  tags:
+    - my_runner
+  script: free -mh
+
+check_cpu:
+  stage: check
+  tags:
+    - my_runner
+  script:
+    - nproc
+
+my_test:
+  stage: test
+  tags:
+    - my_runner
+  script:
+    - result=$(cat file1.txt file2.txt | tr -d '\n')
+    - |
+      if [ "$result" != "Hello world" ]; then
+        echo "Error: concatenation is '$result', expected 'Hello world'"
+        exit 1
+      else
+        echo "Success: concatenation equals 'Hello world'"
+      fi
+
+package:
+  image: ubuntu
+  stage: installer
+  tags:
+    - my_runner
+  script: tar -czf my_package.tar.gz ./*.txt
+  artifacts:
+    when: on_success
+    access: all
+    expire_in: 1 hour
+    paths:
+      - my_package.tar.gz

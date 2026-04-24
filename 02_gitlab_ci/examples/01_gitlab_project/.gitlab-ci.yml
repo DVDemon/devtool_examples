@@ -1,0 +1,39 @@
+stages:
+  - syntax_check
+  - output_check
+  - build
+
+syntax_check:
+  stage: syntax_check
+  image: python:3.12-slim
+  script:
+    - python -m py_compile app.py
+  only:
+    refs:
+      - merge_requests
+      - main
+
+output_check:
+  stage: output_check
+  image: python:3.12-slim
+  script:
+    - python test.py
+  only:
+    refs:
+      - merge_requests
+      - main
+
+build:
+  stage: build
+  image: docker:latest
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+  tags:
+    - my_runner
+  script:
+    - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD docker.io
+    - docker build -t $DOCKER_USERNAME/app:latest .
+    - docker push docker.io/$DOCKER_USERNAME/app:latest
+  only:
+    refs:
+      - main

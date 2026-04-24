@@ -1,0 +1,13 @@
+job_cat:
+  tags:
+    - my_runner
+  script:
+    - result=$(cat file1.txt file2.txt | tr -d '\n')
+    - |
+      if [ "$result" != "Hello world" ]; then
+        echo "Error: concatenation is '$result', expected 'Hello world'"
+        exit 1
+      else
+        echo "Success: concatenation equals 'Hello world'"
+      fi
+  

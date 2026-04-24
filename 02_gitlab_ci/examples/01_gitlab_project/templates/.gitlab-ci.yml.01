@@ -1,0 +1,28 @@
+stages:
+  - check
+  - test
+
+check_hdd:
+  stage: check
+  script: df -h
+
+check_ram:
+  stage: check
+  script: free -mh
+
+check_cpu:
+  stage: check
+  script:
+    - nproc
+
+my_test:
+  stage: test
+  script:
+    - result=$(cat file1.txt file2.txt | tr -d '\n')
+    - |
+      if [ "$result" != "Hello world" ]; then
+        echo "Error: concatenation is '$result', expected 'Hello world'"
+        exit 1
+      else
+        echo "Success: concatenation equals 'Hello world'"
+      fi

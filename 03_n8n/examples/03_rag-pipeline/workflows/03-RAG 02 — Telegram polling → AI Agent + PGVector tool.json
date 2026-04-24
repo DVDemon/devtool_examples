@@ -1,0 +1,251 @@
+{
+  "name": "RAG 02 — Telegram polling → AI Agent + PGVector tool",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const token = 'insert_bot_token_here';\nconst base ='https://api.telegram.org';\n\nconst staticData = $getWorkflowStaticData('global');\nconst last = staticData.lastUpdateId || 0;\n\nconst qs = { timeout: 10 };\nif (last > 0) {\n  qs.offset = last + 1;\n}\n\nconst res = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `${base}/bot${token}/getUpdates`,\n  qs,\n  json: true,\n});\n\nconst updates = res.result || [];\n\nif (updates.length) {\n  staticData.lastUpdateId = Math.max(...updates.map((u) => u.update_id));\n}\n\n// В одном ответе getUpdates может прийти много апдейтов — отвечаем только на последнее\n// текстовое сообщение в каждом чате (макс. update_id), иначе агент дублируется N раз.\nconst latestByChat = new Map();\n\nfor (const u of updates) {\n  const msg = u.message;\n  if (!msg || msg.text === undefined) {\n    continue;\n  }\n  const chatId = msg.chat.id;\n  const prev = latestByChat.get(chatId);\n  if (!prev || u.update_id > prev.updateId) {\n    latestByChat.set(chatId, {\n      updateId: u.update_id,\n      chatId,\n      userText: String(msg.text),\n    });\n  }\n}\n\nconst out = [];\nfor (const row of latestByChat.values()) {\n  out.push({ json: { chatId: row.chatId, userText: row.userText } });\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        688
+      ],
+      "id": "b88e40ea-a937-440f-90c7-1debd8eb4e29",
+      "name": "Poll getUpdates (latest per chat)",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -16,
+        592
+      ],
+      "id": "ff5f80d4-dd03-4629-98f0-fc27988c60e9",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Вопрос пользователя:\n{{ $json.userText }}\n\nСначала вызови инструмент **company_knowledge** с этим вопросом (или коротким поисковым запросом). Затем ответь пользователю по-русски, опираясь только на найденные фрагменты.",
+        "options": {
+          "systemMessage": "=Ты помощник по учебным материалам. Обязательно вызывай инструмент векторного поиска перед ответом. Если в найденных фрагментах нет фактов — честно скажи, что в базе этого нет. Не выдумывай."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        992,
+        592
+      ],
+      "id": "693879a1-863f-463d-9e85-12092ac77b0e",
+      "name": "RAG AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        832
+      ],
+      "id": "97f1cba6-5e3d-42e4-80ab-01f904950290",
+      "name": "DeepSeek Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "gPMpj46rVXnoeYb8",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ 'tg-' + String($json.chatId) }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        992,
+        960
+      ],
+      "id": "b230631c-458c-4fb9-a363-c962ce874c4e",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        960
+      ],
+      "id": "3cd3f28b-33bd-405a-8565-4a4f938596fb",
+      "name": "Embeddings Ollama1",
+      "credentials": {
+        "ollamaApi": {
+          "id": "GWelp5J5yestCRwQ",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "company_knowledge",
+        "toolDescription": "Поиск по учебной базе знаний (конспекты, FAQ курса). Передавай сюда запрос пользователя целиком или перефразированный вопрос.",
+        "tableName": "knowledge_vectors",
+        "topK": 6,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.2,
+      "position": [
+        1248,
+        816
+      ],
+      "id": "3c6ced69-7e2f-4cb1-8d97-1326815d14c8",
+      "name": "company_knowledge1",
+      "credentials": {
+        "postgres": {
+          "id": "5voGfCGfb7qRDExO",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Poll getUpdates (latest per chat)').item.json.chatId }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1264,
+        592
+      ],
+      "id": "0ac57b27-3e8e-4184-aa2a-767bda8fcd8a",
+      "name": "Send Telegram reply1",
+      "webhookId": "e451affd-dc51-499d-9979-0874852ef549",
+      "credentials": {
+        "telegramApi": {
+          "id": "9gIB6CuE1QHTdR0S",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Poll getUpdates (latest per chat)": {
+      "main": [
+        [
+          {
+            "node": "RAG AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Poll getUpdates (latest per chat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram reply1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "RAG AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "RAG AI Agent1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Ollama1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "company_knowledge1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "company_knowledge1": {
+      "ai_tool": [
+        [
+          {
+            "node": "RAG AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "930f2a19-6e58-4512-96b0-de9a70108432",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ccb95bd406a15c892fbc4842ecba309a913bee37682092929f737801f0b7a46"
+  },
+  "id": "2cm9Jk3cRTIeGC4U",
+  "tags": []
+}

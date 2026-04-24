@@ -1,0 +1,87 @@
+# Учебный стенд: n8n (SQLite) + PostgreSQL/pgvector (RAG) + Ollama (локальные эмбеддинги).
+# Запуск из этой папки: docker compose --env-file .env up -d
+#
+# Метаданные n8n — SQLite в томе n8n_data.
+# rag-postgres — только векторы PGVector.
+# ollama — эмбеддинги (модель подтягивает одноразовый сервис ollama-pull-embed).
+#
+# Зафиксированные образы (обновляйте осознанно):
+#   pgvector/pgvector:0.8.2-pg16-bookworm
+#   ollama/ollama:0.18.3
+#   docker.n8n.io/n8nio/n8n:1.121.3
+
+services:
+  rag-postgres:
+    image: pgvector/pgvector:0.8.2-pg16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${RAG_POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${RAG_POSTGRES_PASSWORD:?Set RAG_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${RAG_POSTGRES_DB:-rag}
+    volumes:
+      - rag_pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${RAG_POSTGRES_USER:-rag} -d ${RAG_POSTGRES_DB:-rag}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:0.18.3
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 18
+      start_period: 15s
+
+  # Одноразовая загрузка модели эмбеддингов (общий с ollama сетевой namespace → API на localhost).
+  ollama-pull-embed:
+    image: ollama/ollama:0.18.3
+    depends_on:
+      ollama:
+        condition: service_healthy
+    network_mode: service:ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -e;
+        echo "Pulling embedding model ${OLLAMA_EMBED_MODEL:-nomic-embed-text}...";
+        ollama pull "${OLLAMA_EMBED_MODEL:-nomic-embed-text}";
+        echo "Ollama embedding model ready."
+    restart: "no"
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.121.3
+    container_name: n8n-rag-demo
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      TZ: ${TZ:-Europe/Moscow}
+    depends_on:
+      rag-postgres:
+        condition: service_healthy
+      ollama-pull-embed:
+        condition: service_completed_successfully
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  rag_pgdata:
+  n8n_data:
+  ollama_data:

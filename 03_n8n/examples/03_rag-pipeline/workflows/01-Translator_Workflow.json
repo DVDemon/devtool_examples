@@ -1,0 +1,145 @@
+{
+  "name": "Translator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "dad2b7b9-e193-4e91-b337-a5c3c0ebaa37",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = 'insert_bot_token_here';\nconst staticData = $getWorkflowStaticData('global');\nconst last = staticData.lastUpdateId || 0;\n\nconst qs = { timeout: 25 };\nif (last > 0) {\n  qs.offset = last + 1;\n}\n\nconst res = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `https://api.telegram.org/bot${token}/getUpdates`,\n  qs,\n  json: true,\n});\n\nconst updates = res.result || [];\nconst out = [];\n\nif (updates.length) {\n  staticData.lastUpdateId = Math.max(...updates.map((u) => u.update_id));\n}\n\nfor (const u of updates) {\n  const msg = u.message;\n  if (msg && msg.text !== undefined) {\n    out.push({\n      json: {\n        chatId: msg.chat.id,\n        userText: String(msg.text),\n      },\n    });\n  }\n}\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        0
+      ],
+      "id": "5b589301-afc7-4589-92dd-40cea7ba9c9b",
+      "name": "Poll getUpdates"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Poll getUpdates').item.json.chatId }}",
+        "text": "={{ $json.message.content }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "d53df72c-4be2-44ca-81a4-80ec0b1c2f98",
+      "name": "Send Telegram reply",
+      "webhookId": "2bb8ae32-0c8e-4d96-acf3-6ac79dead719",
+      "credentials": {
+        "telegramApi": {
+          "id": "nsIoBmHCBnyIAeb0",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "deepseek-chat",
+          "mode": "id",
+          "cachedResultName": "deepseek-chat"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Ты опытный преподаватель английского языка. Переведи следующий русский текст на английский и дай краткое объяснение использованной грамматики:\n\nРусский текст: [входной текст]\n\nФормат ответа:\nПеревод: [английский перевод]\nГрамматика: [краткое объяснение грамматических конструкций]\nСовет: [полезный совет по изучению]",
+              "role": "system"
+            },
+            {
+              "content": "=Русский текст: {{ $json.userText }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        256,
+        -112
+      ],
+      "id": "49876d09-bee9-447f-b28b-a0116151d174",
+      "name": "OpenAI Chat (DeepSeek)",
+      "credentials": {
+        "openAiApi": {
+          "id": "iYZTWQBbkgwpI2WE",
+          "name": "OpenAi account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Poll getUpdates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll getUpdates": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat (DeepSeek)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat (DeepSeek)": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "55c94815-5538-4d8f-a89a-6c587c8341cc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1ccb95bd406a15c892fbc4842ecba309a913bee37682092929f737801f0b7a46"
+  },
+  "id": "uVsHeyGOu5yIBLx6",
+  "tags": []
+}
